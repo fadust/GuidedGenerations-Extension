@@ -1,83 +1,134 @@
-// scripts/guidedImpersonate.js
-import { extension_settings, extensionName, debugLog, getPreviousImpersonateInput, setPreviousImpersonateInput, getLastImpersonateResult, setLastImpersonateResult, requestCompletion, shouldUseDirectCall, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
+import { isGenerating } from '../../../../../script.js';
+import {
+    extension_settings,
+    extensionName,
+    fillPromptTemplate,
+    getContext,
+    getPromptValue,
+    requestCompletion,
+    setLastImpersonateResult,
+    setPreviousImpersonateInput,
+    shouldUseDirectCall,
+} from './persistentGuides/guideExports.js';
 
-const guidedImpersonate = async () => {
+let previewPending = false;
+let lastAccepted;
+
+function getChatKey(context) {
+    if (!context) return null;
+    return JSON.stringify([context.groupId || null, context.groupId ? null : context.characterId, context.getCurrentChatId()]);
+}
+
+export async function runGuidedImpersonate(perspective) {
+    if (previewPending) return;
     const textarea = document.getElementById('send_textarea');
-    if (!textarea) {
-        console.error('[GuidedGenerations] Textarea #send_textarea not found.');
+    const context = getContext();
+    if (!textarea || !context) return;
+
+    const draft = textarea.value;
+    const chatKey = getChatKey(context);
+    const matchesDraft = () => document.getElementById('send_textarea') === textarea
+        && textarea.value === draft
+        && getChatKey(getContext()) === chatKey;
+
+    if (lastAccepted?.chatKey === chatKey && lastAccepted.suggestion === draft) {
+        textarea.value = lastAccepted.draft;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        lastAccepted = undefined;
         return;
     }
-    const currentInputText = textarea.value;
-    const lastGeneratedText = getLastImpersonateResult(); // Use getter
 
-    // Check if the current input matches the last generated text
-    if (lastGeneratedText && currentInputText === lastGeneratedText) {
-        textarea.value = getPreviousImpersonateInput(); // Use getter
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        return; // Restoration done, exit
-    }
-
-    // --- If not restoring, proceed with impersonation ---
-    setPreviousImpersonateInput(currentInputText); // Use setter
-
-    // Resolve target profile and preset from settings
-    const profileKey = 'profileImpersonate1st';
-    const presetKey = 'presetImpersonate1st';
-    const profileValue = extension_settings[extensionName]?.[profileKey] ?? '';
-    const presetValue = extension_settings[extensionName]?.[presetKey] ?? '';
-    
-    // Debug: Log the exact values being retrieved
-    debugLog(`[Impersonate-1st] Profile key: "${profileKey}"`);
-    debugLog(`[Impersonate-1st] Preset key: "${presetKey}"`);
-    debugLog(`[Impersonate-1st] Profile value from settings: "${profileValue}"`);
-    debugLog(`[Impersonate-1st] Preset value from settings: "${presetValue}"`);
-    debugLog(`[Impersonate-1st] All profile settings:`, Object.keys(extension_settings[extensionName] || {}).filter(key => key.startsWith('profile')));
-    
-    debugLog(`[Impersonate-1st] Using profile: ${profileValue || 'current'}, preset: ${presetValue || 'none'}`);
-    
-    // Use user-defined impersonate prompt override
-    const promptTemplate = await getPromptValue('promptImpersonate1st', '', {
-        settings: extension_settings[extensionName],
-    });
-    const filledPrompt = fillPromptTemplate(promptTemplate, { input: currentInputText });
-
+    previewPending = true;
     try {
-        const useDirectCall = await shouldUseDirectCall(profileValue, presetValue);
-        if (useDirectCall) {
-            debugLog('[Impersonate-1st] Requesting direct completion...');
-            const completion = await requestCompletion({
-                profileName: profileValue,
-                presetName: presetValue,
-                prompt: filledPrompt,
-                debugLabel: 'impersonate:1st',
+        const settings = extension_settings[extensionName];
+        const profileName = settings?.[`profileImpersonate${perspective}`] ?? '';
+        const presetName = settings?.[`presetImpersonate${perspective}`] ?? '';
+        const template = await getPromptValue(`promptImpersonate${perspective}`, '', { settings });
+        const prompt = fillPromptTemplate(template, { input: draft });
+        const direct = await shouldUseDirectCall(profileName, presetName);
+
+        if (!matchesDraft()) {
+            toastr.info('The draft or chat changed. Run Guided Impersonate again to preview it.');
+            return;
+        }
+        if (isGenerating()) {
+            toastr.info('Wait for the current generation to finish before previewing a draft.');
+            return;
+        }
+
+        let forceChId;
+        if (!direct && context.groupId) {
+            const group = context.groups.find(group => String(group.id) === String(context.groupId));
+            const members = group?.members
+                .map(avatar => context.characters.findIndex(character => character.avatar === avatar))
+                .filter(id => id >= 0);
+            if (!members?.length) {
+                toastr.warning('Add a character to the group before previewing a draft.');
+                return;
+            }
+            // A native quiet group call with no selected member can send the composer as a user message.
+            forceChId = members[Math.floor(Math.random() * members.length)];
+        }
+
+        // Native /impersonate streams into the composer. Quiet generation returns the text for review.
+        const suggestion = direct
+            ? await requestCompletion({
+                profileName,
+                presetName,
+                prompt,
+                debugLabel: `impersonate:${perspective}`,
                 includeChatHistory: true,
                 includeIdentityContext: true,
+            })
+            : await context.generateQuietPrompt({
+                quietPrompt: `${prompt}\n\nReturn only the message for {{user}} to send. Follow the requested perspective.`,
+                quietName: context.name1,
+                forceChId,
             });
 
-            if (completion && completion.trim() !== '') {
-                textarea.value = completion;
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                setLastImpersonateResult(completion);
-                debugLog('[Impersonate-1st] Completion received and stored.');
-            } else {
-                debugLog('[Impersonate-1st] Completion empty, input unchanged.');
-            }
-        } else {
-            const context = SillyTavern.getContext();
-            if (typeof context.executeSlashCommandsWithOptions === 'function') {
-                const stscriptCommand = `/impersonate await=true ${filledPrompt} |`;
-                await context.executeSlashCommandsWithOptions(stscriptCommand);
-                setLastImpersonateResult(textarea.value);
-                debugLog('[Impersonate-1st] Slash command completed, input stored.');
-            } else {
-                console.error('[GuidedGenerations] context.executeSlashCommandsWithOptions not found!');
-            }
+        if (typeof suggestion !== 'string' || !suggestion.trim()) {
+            toastr.warning('No draft suggestion was generated.');
+            return;
         }
-    } catch (error) {
-        console.error(`[GuidedGenerations] Error executing Guided Impersonate (1st): ${error}`);
-        setLastImpersonateResult(''); // Use setter to clear shared state on error
-    }
-};
+        if (!matchesDraft()) {
+            toastr.info('The draft or chat changed. Run Guided Impersonate again to preview it.');
+            return;
+        }
 
-// Export the function
-export { guidedImpersonate };
+        const preview = document.createElement('div');
+        const title = document.createElement('h3');
+        title.textContent = 'Suggested draft';
+        const text = document.createElement('p');
+        text.textContent = suggestion;
+        text.style.whiteSpace = 'pre-wrap';
+        text.style.overflowWrap = 'anywhere';
+        preview.append(title, text);
+
+        const result = await context.callGenericPopup(preview, context.POPUP_TYPE.CONFIRM, '', {
+            okButton: 'Accept',
+            cancelButton: 'Dismiss',
+            defaultResult: context.POPUP_RESULT.NEGATIVE,
+            allowVerticalScrolling: true,
+            leftAlign: true,
+        });
+        if (result !== context.POPUP_RESULT.AFFIRMATIVE) return;
+        if (!matchesDraft()) {
+            toastr.info('The draft or chat changed. Run Guided Impersonate again to preview it.');
+            return;
+        }
+
+        setPreviousImpersonateInput(draft);
+        setLastImpersonateResult(suggestion);
+        lastAccepted = { chatKey, draft, suggestion };
+        textarea.value = suggestion;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        textarea.focus();
+    } catch (error) {
+        console.error(`[GuidedGenerations] Error generating a ${perspective} person draft:`, error);
+        toastr.error('Could not preview a draft. Try Guided Impersonate again.');
+    } finally {
+        previewPending = false;
+    }
+}
+
+export const guidedImpersonate = () => runGuidedImpersonate('1st');
