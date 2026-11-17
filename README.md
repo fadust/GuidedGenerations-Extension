@@ -6,6 +6,8 @@
 
 This extension brings the full power of the original "Guided Generations" Quick Reply set to SillyTavern as a native extension. It provides modular, context-aware tools for shaping, refining, and guiding AI responses—ideal for roleplay, story, and character-driven chats. All features are accessible via intuitive buttons and menus integrated into the SillyTavern UI.
 
+This fork builds on [Samueras’s Guided Generations Extension](https://github.com/Samueras/GuidedGenerations-Extension).
+
 See [`JSDoc.md`](./JSDoc.md) for code-level documentation.
 
 ---
@@ -36,11 +38,11 @@ See [`JSDoc.md`](./JSDoc.md) for code-level documentation.
 - [Video Example](https://youtube.com/shorts/GRQ9l_8K6-Y?feature=share)
 
 ### Impersonation (1st: 👤, 2nd: 👥, 3rd: 🗣️)
-*Expand outlines into rich, in-character narratives.*
-- Enter a brief outline, select perspective (toggle in settings), and press the corresponding button (👤/👥/🗣️).
-- Your outline is expanded into a full message from the chosen viewpoint.
-- Can be hidden or displayed individually per settings. 1st Person is displayed by default.
-- Video Examples:
+*Preview a polished draft from the chosen perspective.*
+- Type an outline or rough draft in the composer and click the corresponding Impersonate button (👤/👥/🗣️).
+- Review the suggested draft. **Accept** replaces the composer text so you can edit or send it. **Dismiss** keeps your original draft.
+- You can show or hide each perspective in Extension Settings. First person is shown by default.
+- Upstream video examples:
   - [1st Person](https://youtube.com/shorts/FT5gv3d2kE4?feature=share)
   - [2nd Person](https://youtube.com/shorts/80l12LrtBpQ?feature=share)
   - [3rd Person](https://youtube.com/shorts/wWka-1URLPg?feature=share)
@@ -64,9 +66,13 @@ See [`JSDoc.md`](./JSDoc.md) for code-level documentation.
   - 🗑️ Flush Guides: Remove selected or all guides.
 - Auto-trigger for Thinking, Clothes, and State can be toggled in settings.
 
+### Simple Send: Character
+
+In a one-on-one character chat, type a message and click **Simple Send: Character** beside the composer. The extension posts exactly what you typed as the current character without calling a model.
+
 ### 🔖 Tools Menu
 *Access additional utilities*
-  - **🔧 Corrections:** Edit the last AI message with targeted instructions.
+  - **🔧 Corrections:** Choose a message and swipe, highlight the passage you want to revise, and add instructions. Click **Preview Rewrite** to see what will be removed and added. **Apply as New Swipe** saves the revision alongside the original. **Cancel** leaves the chat unchanged. With no selection, **Apply Correction** rewrites the whole message as a new swipe.
   - **🧩 Separated Thinking:** Analyze the currently shown AI message against the full chat and generate a corrected version as a new swipe. Can also run automatically after normal replies and swipe generations.
   - **✅ Spellchecker:** Polish your input for grammar, punctuation, and flow.
   - **✈️ Simple Send:** Send input as a user message without triggering a model response.
@@ -77,8 +83,8 @@ See [`JSDoc.md`](./JSDoc.md) for code-level documentation.
 
 ## Installation
 
-1. **Install the Extension:**
-   - In the Extensionmanager click on Install Extension and enter https://github.com/Samueras/GuidedGenerations-Extension/ as the GITHUB
+1. In SillyTavern’s **Extension Manager**, click **Install Extension**.
+2. Enter the URL for [this fork](https://github.com/fadust/GuidedGenerations-Extension).
 
 
 ---
@@ -111,6 +117,7 @@ All extension settings are managed via SillyTavern’s Extension Settings panel:
   - Guided Swipe (👈)
   - Persistent Guides Menu (📖)
   - Optional tool buttons such as Corrections, Spellchecker, Edit Intros, and Separated Thinking.
+  - **Simple Send: Character Button** under **Show Tool Buttons** is enabled by default.
 
 - **Injection Role**: select the role (`system`, `assistant`, or `user`) used when injecting instructions.
 
