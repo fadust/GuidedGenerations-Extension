@@ -19,7 +19,6 @@ const situationalGuide = async (isAuto = false) => {
         genCommandSuffix,
         finalCommand,
         isAuto,
-        previousInjectionAction: 'flush',
         raw: extension_settings[extensionName]?.rawPromptSituational ?? false
     });
 };

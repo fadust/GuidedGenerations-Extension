@@ -1,4 +1,4 @@
-import { extension_settings, getContext, setPreviousImpersonateInput, getPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
+import { extension_settings, getContext, setPreviousImpersonateInput, chat, eventSource, event_types, saveChatConditional, addOneMessage, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 const extensionName = "GuidedGenerations-Extension";
 
@@ -86,6 +86,7 @@ const guidedContinue = async () => {
     const stscriptCommand = `/continue await=true ${commandParameter} |`;
     if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext === 'function') {
         const context = SillyTavern.getContext();
+        const inputBeforeGeneration = textarea.value;
         try {
             isGuidedContinueInProgress = true; 
             await context.executeSlashCommandsWithOptions(stscriptCommand);
@@ -95,15 +96,14 @@ const guidedContinue = async () => {
             indexOfMessageToModify = -1;
             textOfMessageBeforeContinue = '';
         } finally {
-            const restoredInput = getPreviousImpersonateInput();
-            textarea.value = restoredInput;
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            // /continue clears the composer before generating the reply.
+            if (textarea.value === '' && inputBeforeGeneration) {
+                textarea.value = inputBeforeGeneration;
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            }
         }
     } else {
         console.error(`[${extensionName}][Continue] SillyTavern context is not available.`);
-        const restoredInput = getPreviousImpersonateInput();
-        textarea.value = restoredInput;
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
     }
 };
 

@@ -1,4 +1,6 @@
 import { getContext, extension_settings, extensionName, debugLog, createTrackerNote, requestCompletion, shouldUseDirectCall, getPromptValue } from './guideExports.js'; // Import from central hub
+import { SlashCommandScope } from '../../../../../slash-commands/SlashCommandScope.js';
+import { extension_prompt_types } from '../../../../../../script.js';
 
 /**
  * Generic runner for Persistent Guides STScript commands.
@@ -8,13 +10,12 @@ import { getContext, extension_settings, extensionName, debugLog, createTrackerN
  *   genCommandSuffix?: string,
  *   finalCommand?: string,
  *   isAuto?: boolean,
- *   previousInjectionAction?: 'move' | 'flush' | 'none'
  *   raw?: boolean,
  *   skipSituationalTracker?: boolean
  * }} options
  * @returns {Promise<string|null>} Returns pipe output or null on failure.
  */
-export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '', finalCommand = '', isAuto = false, previousInjectionAction = 'none', raw = false, skipSituationalTracker = false }) {
+export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '', finalCommand = '', isAuto = false, raw = false, skipSituationalTracker = false }) {
     // ENHANCED DEBUGGING: Track when runGuideScript is called
     debugLog(`[AUTOTRIGGER-DEBUG] runGuideScript called with:`, {
         guideId: guideId,
@@ -34,22 +35,6 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
     const presetValue = rawPreset.trim().replace(/\|/g, ''); // Remove pipe characters to prevent STScript injection
     const profileValue = rawProfile.trim();
 
-    // Handle previous injection based on action
-    let initCmd = '';
-    if (previousInjectionAction === 'move') {
-        const movedInjectionPrompt = await getPromptValue('persistentGuides.movedPreviousInjection', '');
-        initCmd = `// Read existing injection|
-/listinjects return=object |
-/let injections {{pipe}} |
-/let x {{var::injections}} |
-/var index=${guideId} x |
-/let y {{pipe}} |
-/var index=value y |
-/inject id=${guideId} position=chat scan=true depth=4 ${movedInjectionPrompt} |`;
-    } else if (previousInjectionAction === 'flush') {
-        initCmd = `/flushinject ${guideId} |`;
-    }
-
     // First: Execute the guide generation alone to capture the output
     // Second: Build injection script that will use the captured content
     let injectionScript = finalCommand;
@@ -64,14 +49,19 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
     // Execute STScript via SillyTavern context
     const context = getContext();
     if (context && typeof context.executeSlashCommandsWithOptions === 'function') {
+        const chatId = context.getCurrentChatId();
+        const guideKey = `script_inject_${guideId}`;
+        const previousPrompt = context.chatMetadata?.script_injects?.[guideId];
+        const previousFilter = context.extensionPrompts?.[guideKey]?.filter;
+        let temporaryPrompt;
         try {
-            // Step 0: Run any injection cleanup/move commands before generation
-            if (initCmd) {
-                debugLog(`[${extensionName}] Executing pre-generation injection script...`);
-                await context.executeSlashCommandsWithOptions(initCmd, {
-                    showOutput: false,
-                    handleExecutionErrors: true
-                });
+            if (previousPrompt?.value.trim()) {
+                const template = await getPromptValue('persistentGuides.movedPreviousInjection', '{{pipe}}');
+                if (context.getCurrentChatId() !== chatId) return null;
+                // Move the live prompt during generation without overwriting the saved guide.
+                const previousContent = template.replaceAll('{{pipe}}', () => previousPrompt.value);
+                context.setExtensionPrompt(guideKey, previousContent, extension_prompt_types.IN_CHAT, 4, previousPrompt.scan, previousPrompt.role, previousFilter);
+                temporaryPrompt = context.extensionPrompts[guideKey];
             }
 
             // Step 1: Execute guide generation (direct call or default slash command)
@@ -108,17 +98,22 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
                 capturedGuideOutput = genResult?.pipe || '';
             }
             debugLog(`[${extensionName}] Captured guide output length: ${capturedGuideOutput?.length || 0}`);
+            if (context.getCurrentChatId() !== chatId) return null;
             
             // Step 2: Execute injection script using the captured content
             if (capturedGuideOutput && capturedGuideOutput.trim() !== '') {
-                // Replace {{pipe}} in injection script with actual content
-                const injectionScriptWithContent = injectionScript.replace(/\{\{pipe\}\}/g, capturedGuideOutput);
+                // Expand the generated text after parsing so literal pipes stay in the guide.
+                const scope = new SlashCommandScope();
+                scope.pipe = capturedGuideOutput;
                 debugLog(`[${extensionName}] Executing injection script...`);
                 
-                await context.executeSlashCommandsWithOptions(injectionScriptWithContent, {
+                const injectionResult = await context.executeSlashCommandsWithOptions(injectionScript, {
                     showOutput: false,
-                    handleExecutionErrors: true
+                    handleParserErrors: false,
+                    handleExecutionErrors: true,
+                    scope,
                 });
+                if (injectionResult?.isError || injectionResult?.isAborted) return null;
                 debugLog(`[${extensionName}] Injection script executed successfully`);
             }
             
@@ -152,9 +147,11 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
     <summary>
         📊 ${guideName} Guide - Click to expand
     </summary>
-    <div>
-        ${guideContent}
-    </div>
+<div markdown="1">
+
+${guideContent}
+
+</div>
 </details>`;
                         
                         // Insert the new collapsible section after the closing </details> tag
@@ -181,9 +178,11 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
     <summary>
         📊 ${guideName} Guide - Click to expand
     </summary>
-    <div>
-        ${content}
-    </div>
+<div markdown="1">
+
+${content}
+
+</div>
 </details>`;
                         
                         debugLog(`[${extensionName}] Creating new Situational Tracker note for ${guideId}`);
@@ -204,6 +203,11 @@ export async function runGuideScript({ guideId, genAs = '', genCommandSuffix = '
         } catch (err) {
             console.error(`${extensionName}: Error executing guide script for ${guideId}:`, err);
             return null;
+        } finally {
+            if (temporaryPrompt && getContext()?.extensionPrompts?.[guideKey] === temporaryPrompt) {
+                const { value, position, depth, scan, role } = previousPrompt;
+                context.setExtensionPrompt(guideKey, value, position, depth, scan, role, previousFilter);
+            }
         }
     } else {
         console.error(`${extensionName}: Context unavailable to execute guide script for ${guideId}.`);

@@ -1,6 +1,6 @@
 // scripts/guidedSwipe.js
 
-import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPreviousImpersonateInput, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, debugLog, setPreviousImpersonateInput, getPromptValue, fillPromptTemplate } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Helper function for delays
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -146,7 +146,7 @@ async function generateNewSwipe() {
 
 /**
  * Performs a guided swipe: injects current input as context, swipes to the end,
- * generates a new response, and restores the original input.
+ * and generates a new response without writing to the composer.
  * Uses the extracted generateNewSwipe function and local executeSTScriptCommand.
  */
 const guidedSwipe = async () => {
@@ -232,10 +232,6 @@ const guidedSwipe = async () => {
             const errorMsg = "[GuidedGenerations][Swipe] Critical Error: Guided instruction injection ('instruct') failed to appear in chatMetadata.script_injects after multiple checks.";
             console.error(errorMsg);
             alert("Guided Swipe Error: Could not verify instruction injection ('instruct'). Aborting swipe generation.");
-            // Clean up potentially failed injection attempt and restore input before returning
-            textarea.value = originalInput;
-            // Use the correct key for deletion as well
-            await executeSTScriptCommand('/flushinject instruct');
             return; // Stop execution
         }
 
@@ -245,7 +241,6 @@ const guidedSwipe = async () => {
 
         if (swipeSuccess) {
             debugLog("[Swipe] Guided Swipe finished successfully.");
-            await new Promise(resolve => setTimeout(resolve, 3000));
         } else {
             console.error("[GuidedGenerations][Swipe] Guided Swipe failed during swipe generation step.");
             // Error likely already alerted within generateNewSwipe
@@ -259,16 +254,6 @@ const guidedSwipe = async () => {
             alert(`Guided Swipe Error: ${error.message}`);
         }
     } finally {
-        // Always attempt to restore the input field from the shared state (imported)
-        if (textarea) { // Check if textarea was found initially
-            const restoredInput = getPreviousImpersonateInput();
-            debugLog(`[Swipe] Restoring input field to: "${restoredInput}" (finally block)`);
-            textarea.value = restoredInput;
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        } else {
-            // This case should ideally not happen if the initial check passed
-            debugLog("[Swipe] Textarea was not available for restoration in finally block.");
-        }
         // Clean up injection using the correct key
         debugLog('[Swipe] Cleaning up injection (finally block)');
         await executeSTScriptCommand('/flushinject instruct'); // Already using 'instruct' ID here, which seems correct

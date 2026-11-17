@@ -1,7 +1,7 @@
 /**
  * @file Contains the logic for the Guided Response button.
  */
-import { getContext, extension_settings, isGroupChat, setPreviousImpersonateInput, getPreviousImpersonateInput, debugLog, getPromptValue, fillPromptTemplate, pickGroupMember } from './persistentGuides/guideExports.js'; // Import from central hub
+import { getContext, extension_settings, isGroupChat, setPreviousImpersonateInput, debugLog, getPromptValue, fillPromptTemplate, pickGroupMember } from './persistentGuides/guideExports.js'; // Import from central hub
 
 // Import the guide scripts for direct execution
 import thinkingGuide from './persistentGuides/thinkingGuide.js'; // Correct relative path
@@ -65,29 +65,21 @@ const guidedResponse = async () => {
     // Execute the main stscript command
     if (typeof SillyTavern !== 'undefined' && typeof SillyTavern.getContext === 'function') {
         const context = SillyTavern.getContext();
+        const inputBeforeGeneration = textarea.value;
         try {
             await context.executeSlashCommandsWithOptions(stscriptCommand);
             debugLog('[Response] Executed Command:', stscriptCommand); // Log the command
         } catch (error) {
             console.error(`[GuidedGenerations][Response] Error executing Guided Response stscript: ${error}`);
         } finally {
-            // Always restore the input field from the shared state
-            const restoredInput = getPreviousImpersonateInput();
-            textarea.value = restoredInput;
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            if (typeof SillyTavern === 'undefined' || typeof SillyTavern.getContext !== 'function') {
-                debugLog(`[Response] Restoring input field after context error: "${restoredInput}"`);
+            // /trigger clears the composer before generating the reply.
+            if (textarea.value === '' && inputBeforeGeneration) {
+                textarea.value = inputBeforeGeneration;
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
             }
         }
     } else {
         console.error('[GuidedGenerations][Response] SillyTavern context is not available.');
-        // Even if context isn't available, attempt restore if textarea exists
-        if (textarea) {
-             const restoredInput = getPreviousImpersonateInput();
-             debugLog(`[Response] Restoring input field after context error: "${restoredInput}"`);
-             textarea.value = restoredInput;
-             textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        }
     }
 };
 

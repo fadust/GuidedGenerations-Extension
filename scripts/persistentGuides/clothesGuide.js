@@ -24,7 +24,6 @@ const clothesGuide = async (isAuto = false) => {
         genCommandSuffix,
         finalCommand,
         isAuto,
-        previousInjectionAction: 'move',
         raw: extension_settings[extensionName]?.rawPromptClothes ?? false
     });
 };

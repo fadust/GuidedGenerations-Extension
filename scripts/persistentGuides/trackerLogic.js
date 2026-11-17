@@ -239,9 +239,11 @@ export async function createTrackerNote(trackerUpdate, trackerName, trackerType,
     <summary>
         🔍 Analysis - Click to expand
     </summary>
-    <div>
+<div markdown="1">
+
 ${guideContent}
-    </div>
+
+</div>
 </details>`;
             }
             
@@ -249,9 +251,11 @@ ${guideContent}
     <summary>
         📊 ${trackerName} - Click to expand
     </summary>
-    <div>
+<div markdown="1">
+
 ${trackerUpdate}
-    </div>
+
+</div>
 </details>`;
             
             messageContent = detailsContent;
