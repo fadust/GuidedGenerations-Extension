@@ -3,6 +3,7 @@ import { eventSource, saveSettingsDebounced } from '../../../../script.js'; // F
 
 // Import button logic from separate modules
 import { simpleSend } from './scripts/simpleSend.js';
+import { simpleSendCharacter } from './scripts/simpleSendCharacter.js';
 import { recoverInput } from './scripts/inputRecovery.js';
 import { guidedResponse } from './scripts/guidedResponse.js';
 import { guidedSwipe } from './scripts/guidedSwipe.js';
@@ -189,6 +190,7 @@ export const defaultSettings = {
     showGuidedResponse: true, // Default on for Guided Response
     showGuidedSwipe: true, // Default on for Guided Swipe
     showSimpleSendButton: false, // Individual tool button toggles
+    showSimpleSendCharacterButton: true,
     showRecoverInputButton: false,
     showEditIntrosButton: false,
     showCorrectionsButton: false,
@@ -1311,6 +1313,13 @@ function updateExtensionButtons() {
     if (settings.showSimpleSendButton) {
         const simpleSendButton = createActionButton('gg_simple_send_button', 'Simple Send', 'fa-solid fa-paper-plane', simpleSend);
         regularButtons.push(simpleSendButton);
+    }
+
+    if (settings.showSimpleSendCharacterButton) {
+        const button = createActionButton('gg_simple_send_character_button', 'Simple Send: Character', 'fa-solid fa-comment-dots', simpleSendCharacter);
+        button.setAttribute('role', 'button');
+        button.setAttribute('aria-label', 'Simple Send: Character');
+        regularButtons.push(button);
     }
     
     // Recover Input button
