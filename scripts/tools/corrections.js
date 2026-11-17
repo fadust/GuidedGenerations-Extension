@@ -618,7 +618,6 @@ async function confirmRewrite(context, original, replacement) {
         cancelButton: 'Cancel',
         defaultResult: context.POPUP_RESULT.NEGATIVE,
         leftAlign: true,
-        wide: true,
         allowVerticalScrolling: true,
     });
     return result === context.POPUP_RESULT.AFFIRMATIVE;
