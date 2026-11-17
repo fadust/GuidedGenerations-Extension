@@ -73,6 +73,8 @@ class CorrectionsPopup {
         this.includeChatHistory = true;
         this.selectionStart = null;
         this.selectionEnd = null;
+        this.displayedTarget = null;
+        this.applying = false;
     }
 
     async init(parentElement = document.body) {
@@ -199,6 +201,7 @@ class CorrectionsPopup {
     }
 
     open() {
+        if (this.applying) return;
         if (!this.initialized) {
             console.error('[GuidedGenerations][Corrections] Popup not initialized.');
             return;
@@ -283,6 +286,16 @@ class CorrectionsPopup {
         const messageData = context.chat[this.messageIndex];
         const swipes = this._getSwipesForMessage(messageData);
         const currentSwipe = swipes[this.swipeIndex] ?? messageData?.mes ?? '';
+
+        this.displayedTarget = {
+            chatId: context.getCurrentChatId?.(),
+            messageIndex: this.messageIndex,
+            swipeIndex: this.swipeIndex,
+            message: messageData,
+            visibleText: messageData?.mes,
+            visibleSwipeIndex: messageData?.swipe_id,
+            baseMessage: currentSwipe,
+        };
 
         const messageTextarea = this.popupElement.querySelector('#ggCorrectionsMessage');
         const messageInfo = this.popupElement.querySelector('#ggCorrectionsMessageInfo');
@@ -409,7 +422,10 @@ class CorrectionsPopup {
         const indicator = this.popupElement?.querySelector('#ggCorrectionsSelectionInfo');
         if (!indicator) return;
 
-        if (typeof this.selectionStart === 'number' && typeof this.selectionEnd === 'number' && this.selectionEnd > this.selectionStart) {
+        const hasSelection = Number.isInteger(this.selectionStart) && Number.isInteger(this.selectionEnd)
+            && this.selectionEnd > this.selectionStart;
+        this.popupElement.querySelector('#ggCorrectionsApply').textContent = hasSelection ? 'Preview Rewrite' : 'Apply Correction';
+        if (hasSelection) {
             const length = this.selectionEnd - this.selectionStart;
             indicator.textContent = `Recorded selection: ${length} characters.`;
         } else {
@@ -442,12 +458,19 @@ class CorrectionsPopup {
         return { start: 0, end: 0, hasSelection: false };
     }
 
-    async applyCorrection() {
+    getTargetContext(target) {
         const context = getContext();
-        if (!context || !Array.isArray(context.chat)) {
-            console.error('[GuidedGenerations][Corrections] No chat context available.');
-            return;
+        const message = context?.chat?.[target?.messageIndex];
+        if (!message || message !== target.message || context.getCurrentChatId?.() !== target.chatId
+            || message.mes !== target.visibleText || message.swipe_id !== target.visibleSwipeIndex
+            || this._getSwipesForMessage(message)[target.swipeIndex] !== target.baseMessage) {
+            throw new Error('The selected message or swipe changed. Open Corrections and try again.');
         }
+        return context;
+    }
+
+    async applyCorrection() {
+        if (this.applying) return;
 
         const instructionTextarea = this.popupElement.querySelector('#ggCorrectionsInstruction');
         const messageTextarea = this.popupElement.querySelector('#ggCorrectionsMessage');
@@ -458,63 +481,58 @@ class CorrectionsPopup {
             return;
         }
 
+        const target = this.displayedTarget;
+        const includeChatHistory = this.includeChatHistory;
+        this.applying = true;
         lastCorrectionInstruction = instruction;
-        this.close();
-
-        const messageData = context.chat[this.messageIndex];
-        if (!messageData) {
-            console.error('[GuidedGenerations][Corrections] Selected message not found.');
-            return;
-        }
-
-        const swipes = this._getSwipesForMessage(messageData);
-        const baseMessage = swipes[this.swipeIndex] ?? messageData.mes ?? '';
-        const { start: selectionStart, end: selectionEnd, hasSelection } = this.resolveSelection(baseMessage, messageTextarea);
-        const selectedText = hasSelection ? baseMessage.slice(selectionStart, selectionEnd) : '';
-
-        const profileKey = 'profileCorrections';
-        const presetKey = 'presetCorrections';
-        const profileValue = extension_settings[extensionName]?.[profileKey] ?? '';
-        const targetPreset = extension_settings[extensionName]?.[presetKey] ?? '';
-
-        const promptTemplate = await getPromptValue('promptCorrections', '', {
-            settings: extension_settings[extensionName],
-        });
-        const filledPrompt = fillPromptTemplate(promptTemplate, { input: instruction });
-
-        const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
-        const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
-        let profile = resolveProfileByNameOrId(profileValue, profiles);
-        if (!profile && selectedProfileId) {
-            profile = profiles.find((entry) => entry?.id === selectedProfileId) || null;
-        }
-        const resolvedProfileName = profile?.name || profileValue || selectedProfileId || '';
-        const apiType = profile?.api || (await getProfileApiType(resolvedProfileName));
-        const apiId = extractApiIdFromApiType(apiType) || apiType;
-        const completionMode = resolveCompletionMode(profile, apiType, apiId);
-        const historyBlock = (this.includeChatHistory && completionMode === 'text')
-            ? buildChatHistoryBlock(context.chat || [])
-            : '';
-
-        const taskTemplate = hasSelection
-            ? await getPromptValue('corrections.selectedTextTask', '')
-            : await getPromptValue('corrections.fullMessageTask', '');
-        const promptForModel = fillPromptTemplate(taskTemplate, {
-            instruction: filledPrompt,
-            historyBlock: historyBlock ? `\n\nEarlier conversation history (oldest first; may be truncated by context limits):\n${historyBlock}\n\n--- End of history ---` : '',
-            baseMessage,
-            selectedText,
-        });
-
-        debugLog(`[GuidedGenerations][Corrections] Using profile: ${profileValue || 'current'}, preset: ${targetPreset || 'none'}`);
 
         try {
+            const context = this.getTargetContext(target);
+            const { baseMessage } = target;
+            const { start: selectionStart, end: selectionEnd, hasSelection } = this.resolveSelection(baseMessage, messageTextarea);
+            const selectedText = hasSelection ? baseMessage.slice(selectionStart, selectionEnd) : '';
+            this.close();
+
+            const profileKey = 'profileCorrections';
+            const presetKey = 'presetCorrections';
+            const profileValue = extension_settings[extensionName]?.[profileKey] ?? '';
+            const targetPreset = extension_settings[extensionName]?.[presetKey] ?? '';
+
+            const promptTemplate = await getPromptValue('promptCorrections', '', {
+                settings: extension_settings[extensionName],
+            });
+            const filledPrompt = fillPromptTemplate(promptTemplate, { input: instruction });
+
+            const profiles = context?.extensionSettings?.connectionManager?.profiles || [];
+            const selectedProfileId = context?.extensionSettings?.connectionManager?.selectedProfile || '';
+            let profile = resolveProfileByNameOrId(profileValue, profiles);
+            if (!profile && selectedProfileId) {
+                profile = profiles.find((entry) => entry?.id === selectedProfileId) || null;
+            }
+            const resolvedProfileName = profile?.name || profileValue || selectedProfileId || '';
+            const apiType = profile?.api || (await getProfileApiType(resolvedProfileName));
+            const apiId = extractApiIdFromApiType(apiType) || apiType;
+            const completionMode = resolveCompletionMode(profile, apiType, apiId);
+            const historyBlock = (includeChatHistory && completionMode === 'text')
+                ? buildChatHistoryBlock(context.chat || [])
+                : '';
+
+            const taskTemplate = hasSelection
+                ? await getPromptValue('corrections.selectedTextTask', '')
+                : await getPromptValue('corrections.fullMessageTask', '');
+            const promptForModel = fillPromptTemplate(taskTemplate, {
+                instruction: filledPrompt,
+                historyBlock: historyBlock ? `\n\nEarlier conversation history (oldest first; may be truncated by context limits):\n${historyBlock}\n\n--- End of history ---` : '',
+                baseMessage,
+                selectedText,
+            });
+
+            debugLog(`[GuidedGenerations][Corrections] Using profile: ${profileValue || 'current'}, preset: ${targetPreset || 'none'}`);
+
             const useDirectCall = await shouldUseDirectCall(profileValue, targetPreset);
             let correctedText = '';
 
-            // Close the popup and lock the send button so the user sees that
-            // a generation is in progress (matching spellchecker/requestCompletion behavior).
-            this.close();
+            this.getTargetContext(target);
             setSendButtonState?.(true);
             deactivateSendButtons?.();
 
@@ -534,7 +552,7 @@ class CorrectionsPopup {
                         includeIdentityContext: true,
                     });
                 } else if (typeof context.executeSlashCommandsWithOptions === 'function') {
-                    const command = this.includeChatHistory ? '/gen' : '/genraw';
+                    const command = includeChatHistory ? '/gen' : '/genraw';
                     const result = await context.executeSlashCommandsWithOptions(`${command} ${promptForModel}`, {
                         showOutput: false,
                         handleExecutionErrors: true,
@@ -554,19 +572,56 @@ class CorrectionsPopup {
 
             if (!correctedText || correctedText.trim() === '') {
                 console.error('[GuidedGenerations][Corrections] No corrected text received.');
+                if (hasSelection) alert('The model returned no rewrite. Open Corrections and try again.');
                 return;
+            }
+
+            if (hasSelection) {
+                const previewContext = this.getTargetContext(target);
+                if (!await confirmRewrite(previewContext, selectedText, correctedText)) return;
             }
 
             const updatedMessage = hasSelection
                 ? `${baseMessage.slice(0, selectionStart)}${correctedText}${baseMessage.slice(selectionEnd)}`
                 : correctedText;
 
-            await applyCorrectionSwipe(context, this.messageIndex, updatedMessage);
+            await applyCorrectionSwipe(this.getTargetContext(target), target.messageIndex, updatedMessage);
         } catch (error) {
             console.error('[GuidedGenerations][Corrections] Error during Corrections apply:', error);
             alert(`Corrections Tool Error: ${error.message || 'An unexpected error occurred.'}`);
+        } finally {
+            this.applying = false;
         }
     }
+}
+
+async function confirmRewrite(context, original, replacement) {
+    const preview = document.createElement('div');
+    const heading = document.createElement('h3');
+    heading.textContent = 'Review selected rewrite';
+    preview.append(heading);
+
+    for (const [label, tag, text] of [['Remove', 'del', original], ['Add', 'ins', replacement]]) {
+        const caption = document.createElement('h4');
+        caption.textContent = label;
+        const passage = document.createElement('p');
+        passage.style.whiteSpace = 'pre-wrap';
+        passage.style.overflowWrap = 'anywhere';
+        const change = document.createElement(tag);
+        change.textContent = text;
+        passage.append(change);
+        preview.append(caption, passage);
+    }
+
+    const result = await context.callGenericPopup(preview, context.POPUP_TYPE.CONFIRM, '', {
+        okButton: 'Apply as New Swipe',
+        cancelButton: 'Cancel',
+        defaultResult: context.POPUP_RESULT.NEGATIVE,
+        leftAlign: true,
+        wide: true,
+        allowVerticalScrolling: true,
+    });
+    return result === context.POPUP_RESULT.AFFIRMATIVE;
 }
 
 const correctionsPopup = new CorrectionsPopup();
